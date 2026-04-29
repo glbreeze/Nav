@@ -1,0 +1,100 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Caches / coverage / tests ---
+.cache
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints
+
+# --- Editors / OS ---
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# --- Environments ---
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Logs / runs / artifacts ---
+*.log
+*.log.json
+nohup.out
+wandb/
+logs/
+results/
+result/
+.gradio/
+.vis_debug
+work_dirs/
+
+# --- Model weights / checkpoints / data ---
+*.pkl
+*.pkl.json
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.safetensors
+checkpoints/
+ckpt/
+
+# --- Media (large) ---
+*.mp4
+*.mov
+*.avi
+*.ply
+
+# --- NavDP specific ---
+NavDP/assets/_hf_cache/
+NavDP/assets/scenes/
+NavDP/assets/scenes/Materials/*
+NavDP/assets/scenes/SkyTexture/*
+NavDP/assets/scenes/embodiedscan/*
+NavDP/baselines/logoplanner/ckpt/
+NavDP/startgoal_logoplanner_*/
+NavDP/baselines/navdp/checkpoints/
+
+# --- InternNav specific (was submodule, kept out of repo) ---
+InternNav/internnav/model/basemodel/LongCLIP/
+
+# --- Misc ---
+pre-commit*
+*.pid
+data/
+kujiale_data/
+interiornav_data/
+images/
