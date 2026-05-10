@@ -1,7 +1,13 @@
+import os
+
 from internnav.configs.model.logoplanner import logoplanner_cfg
 from internnav.configs.trainer.eval import EvalCfg
 from internnav.configs.trainer.exp import ExpCfg
 from internnav.configs.trainer.il import FilterFailure, IlCfg, Loss
+
+# Project root = parent of InternNav/ (also parent of NavDP/ and checkpoints/).
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+_STAGE1_CKPT = os.path.join(_PROJECT_ROOT, 'checkpoints', 'logoplanner', 'logoplanner_policy.ckpt')
 
 logoplanner_exp_cfg = ExpCfg(
     name='logoplanner_train',
@@ -36,8 +42,11 @@ logoplanner_exp_cfg = ExpCfg(
         inflection_weight_coef=3.2,
         save_interval_epochs=5,
         save_filter_frozen_weights=False,
-        load_from_ckpt=False,
-        ckpt_to_load='',
+        load_from_ckpt=True,
+        ckpt_to_load=_STAGE1_CKPT,
+        # Stage-2 finetuning: load stage-1 LoGoPlanner_Policy ckpt, freeze
+        # geometry backbone decoder; train diffusion + task heads.
+        stage=2,
         lmdb_map_size=1e12,
         dataset_r2r_root_dir='data/vln_pe/raw_data/r2r',
         dataset_3dgs_root_dir='',
@@ -45,7 +54,7 @@ logoplanner_exp_cfg = ExpCfg(
         lmdb_features_dir='r2r',
         lerobot_features_dir='data/vln_pe/traj_data/r2r',
         camera_name='pano_camera_0',
-        report_to='tensorboard',
+        report_to='wandb',
         dataset_navdp='./logoplanner_dataset_lerobot.json',
         root_dir='/home/asus/Research/datasets/InternData-N1/vln_n1/traj_data_navdp',
         image_size=224,

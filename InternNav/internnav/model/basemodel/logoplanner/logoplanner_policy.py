@@ -73,19 +73,51 @@ class LoGoPlannerNet(PreTrainedModel):
         if pretrained_model_name_or_path is None or len(pretrained_model_name_or_path) == 0:
             pass
         elif os.path.isdir(pretrained_model_name_or_path):
-            incompatible_keys, _ = model.load_state_dict(
-                torch.load(os.path.join(pretrained_model_name_or_path, 'pytorch_model.bin'))
-            )
-            if len(incompatible_keys) > 0:
-                print(f'Incompatible keys: {incompatible_keys}')
+            state = torch.load(os.path.join(pretrained_model_name_or_path, 'pytorch_model.bin'))
+            state = cls._remap_logoplanner_keys(state, model)
+            missing, unexpected = model.load_state_dict(state, strict=False)
+            cls._report_load(missing, unexpected)
         else:
             ckpt = torch.load(pretrained_model_name_or_path, map_location='cpu')
             state = ckpt['state_dict'] if isinstance(ckpt, dict) and 'state_dict' in ckpt else ckpt
-            incompatible_keys, _ = model.load_state_dict(state, strict=False)
-            if len(incompatible_keys) > 0:
-                print(f'Incompatible keys: {incompatible_keys}')
+            state = cls._remap_logoplanner_keys(state, model)
+            missing, unexpected = model.load_state_dict(state, strict=False)
+            cls._report_load(missing, unexpected)
+
+        # Stage-2 finetuning: freeze geometry backbone decoder portion of state_encoder.
+        # Paper Sec V.A: "Geometry backbone decoder" frozen; task heads + tokenizers stay trainable.
+        il = config.model_cfg['il'] if isinstance(config, LoGoPlannerModelConfig) else None
+        stage = il.get('stage', None) if il is not None else None
+        if stage == 2:
+            model._apply_stage2_freeze()
 
         return model
+
+    @staticmethod
+    def _remap_logoplanner_keys(state, model):
+        """Map a raw LoGoPlanner_Policy state_dict (top-level keys like
+        ``state_encoder.*``, ``rgbd_encoder.*``, ``decoder.*``, ...) onto
+        ``LoGoPlannerNet`` (which wraps the policy under ``self.policy.*``).
+
+        Drops keys for modules that are not instantiated in the current
+        ``LoGoPlanner_Policy`` (e.g. ``cs_pred_mlp`` is commented out).
+        """
+        own = set(model.state_dict().keys())
+        remapped = type(state)() if hasattr(state, 'keys') else {}
+        for k, v in state.items():
+            new_k = k if k.startswith('policy.') else f'policy.{k}'
+            if new_k in own:
+                remapped[new_k] = v
+        return remapped
+
+    @staticmethod
+    def _report_load(missing, unexpected):
+        if missing:
+            print(f'[LoGoPlannerNet] missing keys ({len(missing)}): '
+                  f'{missing[:5]}{" ..." if len(missing) > 5 else ""}')
+        if unexpected:
+            print(f'[LoGoPlannerNet] unexpected keys ({len(unexpected)}): '
+                  f'{unexpected[:5]}{" ..." if len(unexpected) > 5 else ""}')
 
     def __init__(self, config: LoGoPlannerModelConfig):
         super().__init__(config)
@@ -117,12 +149,77 @@ class LoGoPlannerNet(PreTrainedModel):
             device=self._device,
         )
 
+    # Stage-2 freeze: Pi3 ViT encoder + geometry backbone decoder portion of
+    # state_encoder. Task-specific heads, tokenizers, depth_model, and the
+    # entire diffusion stack stay trainable.
+    _STAGE2_FROZEN_SUBMODULES = (
+        'policy.state_encoder.encoder',
+        'policy.state_encoder.decoder',
+        'policy.state_encoder.camera_decoder',
+        'policy.state_encoder.point_decoder',
+        'policy.state_encoder.conf_decoder',
+        'policy.state_encoder.world_point_decoder',
+    )
+    _STAGE2_FROZEN_PARAMS = (
+        'policy.state_encoder.register_token',
+    )
+    # Always-frozen modules (independent of stage). These have parameters but
+    # are never reached during forward, so DDP would otherwise complain that
+    # they receive no gradient:
+    #   - policy.decoder_layer: a template module that nn.TransformerDecoder
+    #     deep-copies into self.decoder.layers; the original is unused.
+    #   - policy.point_encoder: annotated "never used" in LoGoPlanner_Policy.
+    #   - state_encoder.conf_head: Pi3 ships a confidence head but
+    #     GeometryModel.forward never calls it.
+    _ALWAYS_FROZEN_SUBMODULES = (
+        'policy.decoder_layer',
+        'policy.point_encoder',
+        'policy.state_encoder.conf_head',
+    )
+    # Inherited-but-unused individual params:
+    #   - DinoV2 mask_tokens: used only during MAE pretraining
+    #   - camera_head.fc_t / fc_rot: ExtrinctHead overrides CameraHead with
+    #     fc_pose; the inherited fc_t/fc_rot are never called.
+    _ALWAYS_FROZEN_PARAMS = (
+        'policy.rgbd_encoder.rgb_model.mask_token',
+        'policy.rgbd_encoder.depth_model.mask_token',
+        'policy.state_encoder.depth_model.mask_token',
+        'policy.state_encoder.camera_head.fc_t.weight',
+        'policy.state_encoder.camera_head.fc_t.bias',
+        'policy.state_encoder.camera_head.fc_rot.weight',
+        'policy.state_encoder.camera_head.fc_rot.bias',
+    )
+
+    def _apply_stage2_freeze(self):
+        frozen_prefixes = self._STAGE2_FROZEN_SUBMODULES + self._ALWAYS_FROZEN_SUBMODULES
+        frozen_params = set(self._STAGE2_FROZEN_PARAMS) | set(self._ALWAYS_FROZEN_PARAMS)
+        frozen = 0
+        trainable_param_count = 0
+        for name, p in self.named_parameters():
+            should_freeze = (
+                any(name.startswith(prefix + '.') for prefix in frozen_prefixes)
+                or name in frozen_params
+            )
+            if should_freeze:
+                p.requires_grad = False
+                frozen += p.numel()
+            else:
+                trainable_param_count += p.numel()
+        print(f'[LoGoPlannerNet] stage-2 freeze applied: '
+              f'frozen={frozen:,} trainable={trainable_param_count:,}')
+
     # Keep ``policy.device`` / tgt_mask / cond_critic_mask consistent with HF's
-    # .to() — ``LoGoPlanner_Policy`` stores .device as a plain attribute.
+    # .to() — ``LoGoPlanner_Policy`` and its submodules cache .device as plain
+    # attributes (used by torch.as_tensor(..., device=self.device) inside
+    # NavDP_RGBD_Backbone.forward and GeometryModel.forward_*). DDP places
+    # weights on cuda:<local_rank> but won't update those cached strings, so
+    # we propagate them here.
     def to(self, device, *args, **kwargs):
         self = super().to(device, *args, **kwargs)
         self._device = device
         self.policy.device = device
+        self.policy.rgbd_encoder.device = device
+        self.policy.state_encoder.device = device
         self.policy.tgt_mask = self.policy.tgt_mask.to(device)
         self.policy.cond_critic_mask = self.policy.cond_critic_mask.to(device)
         return self
@@ -162,7 +259,7 @@ class LoGoPlannerNet(PreTrainedModel):
         batch_labels,
         batch_augments,
     ):
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         p = self.policy
         device = next(self.parameters()).device
 

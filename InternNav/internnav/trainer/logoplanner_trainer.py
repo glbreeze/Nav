@@ -128,6 +128,22 @@ class LoGoPlannerTrainer(BaseTrainer):
             'world_loss': world_loss,
             'subgoal_loss': subgoal_loss,
         }
+
+        # Per-component loss breakdown to wandb. self.log is rank-0-only inside
+        # HF Trainer; gate by logging_steps to match the cadence of train/loss
+        # and avoid the per-step .item() sync cost.
+        if self.state.global_step % self.args.logging_steps == 0:
+            self.log({
+                'train/action_loss': action_loss.item(),
+                'train/ng_action_loss': ng_action_loss.item(),
+                'train/mg_action_loss': mg_action_loss.item(),
+                'train/critic_loss': critic_loss.item(),
+                'train/pose_loss': pose_loss.item(),
+                'train/local_loss': local_loss.item(),
+                'train/world_loss': world_loss.item(),
+                'train/subgoal_loss': subgoal_loss.item(),
+            })
+
         return (loss, outputs) if return_outputs else loss
 
     def create_optimizer(self):

@@ -32,7 +32,7 @@ class LoGoPlanner_Policy(nn.Module):
         # input encoders
         self.rgbd_encoder = NavDP_RGBD_Backbone(image_size,token_dim,memory_size=memory_size,device=device)
         self.state_encoder = GeometryModel(context_size=context_size,device=device)
-        self.point_encoder = nn.Linear(3,self.token_dim)
+        self.point_encoder = nn.Linear(3,self.token_dim) # never used 
         
         self.start_encoder = nn.Linear(3,self.token_dim)
         self.state_decoder = TokenCompressor(embed_dim=token_dim, 
@@ -44,10 +44,13 @@ class LoGoPlanner_Policy(nn.Module):
                                                         activation = 'gelu',
                                                         batch_first = True,
                                                         norm_first = True)
+        # Shared backbone for both diffusion denoising and critic scoring.
         self.decoder = nn.TransformerDecoder(decoder_layer = self.decoder_layer,
                                              num_layers = self.temporal_depth)
         
+        # Embeds 3-D action waypoints (noisy or candidate trajectories) for the decoder
         self.input_embed = nn.Linear(3,token_dim)
+        # Predicts a sub-pointgoal (short-horizon goal in current frame) from state_embed.
         self.pg_pred_mlp = nn.Sequential(
             nn.Linear(token_dim, token_dim//2),
             nn.ReLU(),
@@ -55,20 +58,20 @@ class LoGoPlanner_Policy(nn.Module):
             nn.ReLU(),
             nn.Linear(token_dim//4, 3)
         )
-        self.cs_pred_mlp = nn.Sequential(
-            nn.Linear(token_dim, token_dim//2),
-            nn.ReLU(),
-            nn.Linear(token_dim//2, token_dim//4),
-            nn.ReLU(),
-            nn.Linear(token_dim//4, 3)
-        )
+        # self.cs_pred_mlp = nn.Sequential( # not used 
+        #     nn.Linear(token_dim, token_dim//2),
+        #     nn.ReLU(),
+        #     nn.Linear(token_dim//2, token_dim//4),
+        #     nn.ReLU(),
+        #     nn.Linear(token_dim//4, 3)
+        # )
         
         self.cond_pos_embed = LearnablePositionalEncoding(token_dim, memory_size+context_size*2+4)
         self.out_pos_embed = LearnablePositionalEncoding(token_dim, predict_size)
         self.time_emb = SinusoidalPosEmb(token_dim)
         self.layernorm = nn.LayerNorm(token_dim)
         
-        self.action_head = nn.Linear(token_dim, 3)
+        self.action_head = nn.Linear(token_dim, 3) # ε-prediction head for DDPM diffusion over 24 waypoints.
         self.critic_head = nn.Linear(token_dim, 1)
         self.noise_scheduler = DDPMScheduler(num_train_timesteps=10,
                                        beta_schedule='squaredcos_cap_v2',

@@ -10,7 +10,9 @@ This working directory contains two sibling repositories:
 
 NavDP (Navigation Diffusion Policy) is an end-to-end mapless navigation benchmark and model suite built on NVIDIA IsaacSim/IsaacLab. It evaluates visual navigation methods via a decoupled client-server architecture: navigation models run as Flask HTTP servers, while IsaacSim runs the simulation environment and sends RGB-D observations to the server for trajectory planning.
 
-**Training lives in the sibling `InternNav/` directory.** The `NavDP/` repo is inference + evaluation only. NavDP model training code is in `InternNav/` — entry `scripts/train/train.py --model-name navdp`, trainer `internnav/trainer/navdp_trainer.py`, dataset `internnav/dataset/navdp_dataset_lerobot.py`, config `scripts/train/configs/navdp.py`. When the user asks about training, dataset loaders, loss functions, or the InternData-N1 dataset format, read from `InternNav/` rather than `NavDP/`.
+**Training lives in the sibling `InternNav/` directory.** The `NavDP/` repo is inference + evaluation only. `InternNav/` is a broader navigation toolbox covering several model families — `cma`, `seq2seq`, `rdp`, `navdp`, `logoplanner`, `internvla_n1` — each with parallel `internnav/trainer/<m>_trainer.py`, `internnav/dataset/<m>_dataset_lerobot.py`, `internnav/model/basemodel/<m>/`, and `scripts/train/configs/<m>.py`. The dispatch happens in `scripts/train/train.py` via `--model-name`. When the user asks about training, dataset loaders, loss functions, or the InternData-N1 dataset format, read from `InternNav/` rather than `NavDP/`.
+
+`GL.md` (root and `NavDP/GL.md`) is the user's running scratchpad with dataset conversion notes and paper-derived loss/training plans — useful context but not authoritative; trust the code.
 
 ## Environment Setup
 
@@ -44,20 +46,30 @@ cd NavDP/baselines/navdp/
 python navdp_server.py --port 8888 --checkpoint ./checkpoints/navdp_checkpoint.ckpt
 ```
 
-**Run evaluation** (requires IsaacSim environment, run from `NavDP/`):
+**Run evaluation** (requires IsaacSim environment, run from `NavDP/`). One script per task type — `nogoal`, `pointgoal`, `imagegoal`, `startgoal` (start→goal without odometry):
 ```bash
 cd NavDP/
 python eval_pointgoal_wheeled.py --port 8888 --scene_dir /absolute/path/to/scene --scene_index 0 --scene_scale 1.0
-python eval_nogoal_wheeled.py --port 8888 --scene_dir /absolute/path/to/scene --scene_index 0 --scene_scale 1.0
+python eval_nogoal_wheeled.py    --port 8888 --scene_dir /absolute/path/to/scene --scene_index 0 --scene_scale 1.0
 python eval_imagegoal_wheeled.py --port 8888 --scene_dir /absolute/path/to/scene --scene_index 0 --scene_scale 1.0
+python eval_startgoal_wheeled.py --port 8888 --scene_dir /absolute/path/to/scene --scene_index 0 --scene_scale 1.0
 ```
-Scene scale: `0.01` for internscenes, `1.0` for cluttered scenes. Scene dir must be an absolute path.
+Scene scale: `0.01` for internscenes, `1.0` for cluttered scenes. Scene dir must be an absolute path. `run.sh` at the NavDP root has a working LoGoPlanner end-to-end smoke test (server on port 19999 → `eval_startgoal_wheeled.py`).
 
 **Teleoperation** (keyboard control with trajectory visualization):
 ```bash
 cd NavDP/
 python teleop_pointgoal_wheeled.py   # WASD controls
 ```
+
+**InternNav training** (run from `InternNav/`). `scripts/train/start_train.sh` is the canonical wrapper — it sets `CUDA_VISIBLE_DEVICES` per model and uses `torchrun` for `navdp` (8-GPU) but plain `python` otherwise:
+```bash
+bash scripts/train/start_train.sh --name my_run --model rdp        # cma | cma_plus | seq2seq | seq2seq_plus | rdp | navdp
+bash scripts/train/runs.sh                                         # single-GPU smoke test for logoplanner on a small shard
+```
+The `rdp`/`navdp`/`logoplanner` paths import from `src/diffusion-policy/` — that's a git submodule (`git submodule update --init`) and `runs.sh` exports `PYTHONPATH="$PWD/src/diffusion-policy:..."`. If you launch via `train.py` directly, replicate that export.
+
+**InternNav evaluation**: `scripts/eval/eval_habitat.py` for VLN-CE / Habitat tasks; `scripts/eval/eval.py` + `scripts/eval/start_server.py` (with configs in `scripts/eval/configs/h1_*_cfg.py`) for IsaacSim/InternUtopia tasks. InternNav-trained checkpoints can also be served to `NavDP/`'s eval scripts via the matching baseline server in `NavDP/baselines/`.
 
 ## Architecture
 
@@ -80,6 +92,8 @@ Each subdirectory is a self-contained navigation method: `navdp`, `logoplanner`,
 - `policy_network.py` / `*_network.py` — the neural network model
 
 **NavDP model** (`NavDP/baselines/navdp/`): Uses DepthAnythingV2 as the RGB-D backbone, a transformer decoder for temporal fusion, and DDPM diffusion (10 timesteps) to generate trajectory predictions. Key params: `memory_size=8` (observation history), `predict_size=24` (waypoints), `token_dim=384`.
+
+**LoGoPlanner** (`NavDP/baselines/logoplanner/`): The newer localization-grounded extension of NavDP, with its own `README.md`, real-world deployment code (`lekiwi_logoplanner_host.py`, `deployment/`) and a Pi3-based geometry head (`geometry_model.py`, vendored `Pi3/` directory). Demonstrated end-to-end in `NavDP/run.sh`.
 
 ### Simulation Framework (`NavDP/configs/`, `NavDP/wheeled_robots/`)
 

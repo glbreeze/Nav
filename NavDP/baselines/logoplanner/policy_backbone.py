@@ -95,7 +95,7 @@ class NavDP_RGBD_Backbone(nn.Module):
         # Perceiver-style compression: M RGB + 1 depth frame -> M fused memory tokens.                                                                                                                                   
         # Resolution locked to 168x308 (12x22 = 264 patches) by former_pe.   
          
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         # --- ViT patch tokens: images (B, M, H, W, 3) -> (B, M*264, 384) ---     
         B,T,H,W,C = images.shape
         tensor_images = torch.as_tensor(images,dtype=torch.float32,device=self.device).permute(0,1,4,2,3)

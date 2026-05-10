@@ -108,7 +108,7 @@ class GeometryModel(Pi3):
         return scene_token
     
     def forward(self, imgs, depths):
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         B, N, H, W, _ = imgs.shape
         assert N == self.context_size
         patch_h, patch_w = H // 14, W // 14
