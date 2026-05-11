@@ -1,3 +1,4 @@
+import re
 import torch
 import numpy as np
 import cv2
@@ -23,8 +24,33 @@ class LoGoPlanner_Agent:
         self.image_size = image_size
         self.memory_size = memory_size
         self.context_size = context_size
+
+        sd = torch.load(navi_model, map_location=self.device)
+        if any(k.startswith('policy.') for k in sd.keys()):
+            sd = {(k[len('policy.'):] if k.startswith('policy.') else k): v for k, v in sd.items()}
+            print("[LoGoPlanner_Agent] stripped 'policy.' prefix from checkpoint keys")
+
+        layer_idxs = set()
+        for k in sd.keys():
+            m = re.search(r'decoder\.layers\.(\d+)\.', k)
+            if m:
+                layer_idxs.add(int(m.group(1)))
+        if layer_idxs:
+            detected_depth = max(layer_idxs) + 1
+            if detected_depth != temporal_depth:
+                print(f"[LoGoPlanner_Agent] overriding temporal_depth {temporal_depth} -> {detected_depth} (from ckpt)")
+                temporal_depth = detected_depth
+
         self.navi_former = LoGoPlanner_Policy(image_size,memory_size,context_size,predict_size,temporal_depth,heads,token_dim,device)
-        self.navi_former.load_state_dict(torch.load(navi_model,map_location=self.device),strict=False)
+        missing, unexpected = self.navi_former.load_state_dict(sd, strict=False)
+        if missing:
+            raise RuntimeError(
+                f"[LoGoPlanner_Agent] {len(missing)} missing keys when loading {navi_model} "
+                f"(model params would be random-initialized). First few: {list(missing)[:5]}"
+            )
+        if unexpected:
+            print(f"[LoGoPlanner_Agent] {len(unexpected)} unexpected keys in checkpoint (ignored): {list(unexpected)[:5]}")
+
         self.navi_former.to(self.device)
         self.navi_former.eval()
         self.target_H, self.target_W = 168, 308
