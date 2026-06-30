@@ -58,6 +58,35 @@ The **training** counterpart lives in the sibling repo: `InternNav/internnav/mod
 The model definition (`MemNav_Policy`, `CrossViewRetrievalHead`) is mirrored between the two repos
 (same convention as `navdp`/`logoplanner`); keep them in sync.
 
+## Setup — vendored dependencies (not in this repo)
+
+Two third-party repos are **gitignored** (their weights exceed GitHub's 100 MB limit), so a fresh
+clone of `Nav` has empty `lingbot-map/` and `Long-CLIP/` dirs. Re-create them:
+
+```bash
+# 1. LingBot-Map — frozen GCT streaming backbone (pinned commit)
+git clone https://github.com/Robbyant/lingbot-map.git \
+    NavDP/baselines/memnav/lingbot-map
+git -C NavDP/baselines/memnav/lingbot-map checkout 3c63739
+
+# 2. LingBot weights (~4.4 GB) — download into the repo's weights/ dir.
+#    Path must match LingBotStream's default `weights=` arg:
+#      NavDP/baselines/memnav/lingbot-map/weights/lingbot-map-long.pt
+#    (obtain from the LingBot-Map release / project owner)
+
+# 3. Long-CLIP — only needed by the navdp model path (pinned commit)
+git clone https://github.com/beichenzbc/Long-CLIP.git \
+    InternNav/internnav/model/basemodel/Long-CLIP
+git -C InternNav/internnav/model/basemodel/Long-CLIP checkout 3966af9
+```
+
+Validate the LingBot streaming wrapper after setup (expects cosine ≈ 1.0 vs the official forward):
+
+```bash
+conda activate memnav
+python InternNav/scripts/dataset_converters/validate_lingbot_stream.py
+```
+
 ## Run
 
 ```bash

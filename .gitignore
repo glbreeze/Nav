@@ -102,3 +102,7 @@ images/
 # --- Vendored third-party repos (clone separately; weights too big for GitHub) ---
 InternNav/internnav/model/basemodel/Long-CLIP/
 NavDP/baselines/memnav/lingbot-map/
+
+# --- Large local data trees (multi-GB; never push) ---
+NavDP/assets/scenes/
+NavDP/checkpoints/
